@@ -392,7 +392,7 @@
 | 前端框架  | [Next.js 16.1.0](https://nextjs.org/) · App Router                                                        |
 | UI & 样式 | [Tailwind CSS 4.1.18](https://tailwindcss.com/) · [Framer Motion 12.18.1](https://www.framer.com/motion/)                                                       |
 | 语言      | TypeScript 5.8.3                                                                                          |
-| 播放器    | [ArtPlayer 5.3.0](https://github.com/zhw2590582/ArtPlayer) · [HLS.js 1.6.15](https://github.com/video-dev/hls.js/)  · [artplayer-plugin-danmuku 5.2.0](https://github.com/zhw2590582/ArtPlayer) |
+| 播放器    | [Shaka Player](https://github.com/shaka-player/shaka-player) · 内置 HLS/DASH 支持 · 自定义弹幕方案 |
 | 状态管理  | React 19.0.0 Context API · React Hooks                                                                              |
 | 数据存储  | Kvrocks · Redis · Upstash · localStorage                                                                              |
 | 虚拟化  | [react-window 2.2.3](https://github.com/bvaughn/react-window) · ResizeObserver                                                                              |

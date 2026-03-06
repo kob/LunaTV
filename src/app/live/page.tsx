@@ -5,6 +5,8 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import Hls from 'hls.js';
+import type shaka from 'shaka-player';
+import { toast } from 'sonner';
 import { Heart, Menu, Radio, RefreshCw, Search, Tv, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Tabs, Tab, Box } from '@mui/material';
@@ -416,6 +418,9 @@ function LivePageClient() {
 
   // 播放器引用
   const artPlayerRef = useRef<any>(null);
+  // new refs for Shaka migration
+  const shakaPlayerRef = useRef<shaka.Player | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
 
   // 分组标签滚动相关
@@ -1028,58 +1033,48 @@ function LivePageClient() {
 
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
-    // 重置不支持的类型状态
+    // reset unsupported type state
     setUnsupportedType(null);
 
-    if (artPlayerRef.current) {
+    // destroy Shaka player if exists
+    if (shakaPlayerRef.current) {
       try {
-        // 先暂停播放
-        if (artPlayerRef.current.video) {
-          artPlayerRef.current.video.pause();
-          artPlayerRef.current.video.src = '';
-          artPlayerRef.current.video.load();
-        }
-
-        // 销毁 HLS 实例
-        if (artPlayerRef.current.video && artPlayerRef.current.video.hls) {
-          artPlayerRef.current.video.hls.destroy();
-          artPlayerRef.current.video.hls = null;
-        }
-
-        // 销毁 FLV 实例 - 增强清理逻辑
-        if (artPlayerRef.current.video && artPlayerRef.current.video.flv) {
-          try {
-            // 先停止加载
-            if (artPlayerRef.current.video.flv.unload) {
-              artPlayerRef.current.video.flv.unload();
-            }
-            // 销毁播放器
-            artPlayerRef.current.video.flv.destroy();
-            // 确保引用被清空
-            artPlayerRef.current.video.flv = null;
-          } catch (flvError) {
-            console.warn('FLV实例销毁时出错:', flvError);
-            // 强制清空引用
-            artPlayerRef.current.video.flv = null;
-          }
-        }
-
-        // 移除所有事件监听器
-        artPlayerRef.current.off('ready');
-        artPlayerRef.current.off('loadstart');
-        artPlayerRef.current.off('loadeddata');
-        artPlayerRef.current.off('canplay');
-        artPlayerRef.current.off('waiting');
-        artPlayerRef.current.off('error');
-
-        // 销毁 ArtPlayer 实例
-        artPlayerRef.current.destroy();
-        artPlayerRef.current = null;
-      } catch (err) {
-        console.warn('清理播放器资源时出错:', err);
-        artPlayerRef.current = null;
-      }
+        shakaPlayerRef.current.destroy();
+      } catch {}
+      shakaPlayerRef.current = null;
     }
+
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.src = '';
+        videoRef.current.load();
+      } catch {}
+
+      if (videoRef.current.hls) {
+        videoRef.current.hls.destroy();
+        videoRef.current.hls = null;
+      }
+      if (videoRef.current.flv) {
+        try {
+          if (videoRef.current.flv.unload) {
+            videoRef.current.flv.unload();
+          }
+          videoRef.current.flv.destroy();
+        } catch (flvError) {
+          console.warn('FLV实例销毁时出错:', flvError);
+        }
+        videoRef.current.flv = null;
+      }
+
+      if (videoRef.current.parentElement) {
+        videoRef.current.parentElement.removeChild(videoRef.current);
+      }
+      videoRef.current = null;
+    }
+
+    // clear adapter/reference used elsewhere
+    videoRef.current = null;
   };
 
   // 确保视频源正确设置
@@ -2071,7 +2066,7 @@ function LivePageClient() {
       console.log('视频URL:', videoUrl);
 
       // 销毁之前的播放器实例并创建新的
-      if (artPlayerRef.current) {
+      if (videoRef.current) {
         cleanupPlayer();
       }
 
@@ -2104,176 +2099,70 @@ function LivePageClient() {
         console.log(`🎬 播放模式: 🔄 代理 (${isFlvUrl ? 'FLV' : 'M3U8'}) | URL: ${targetUrl.substring(0, 100)}...`);
       }
 
-      // 根据 URL 类型选择播放器类型
-      const playerType = isFlvUrl ? 'flv' : 'm3u8';
-      console.log(`📺 播放器类型: ${playerType} | FLV检测: ${isFlvUrl}`);
-
-      const customType = {
-        m3u8: m3u8Loader,
-        flv: flvLoader,
-      };
-
       try {
-        // 使用动态导入的 Artplayer
-        const Artplayer = (window as any).DynamicArtplayer;
+        // Shaka Player 初始化
+        if (!videoRef.current) {
+          console.log('视频元素不存在');
+          return;
+        }
 
-        // 创建新的播放器实例
-        Artplayer.USE_RAF = false;
-        Artplayer.FULLSCREEN_WEB_IN_BODY = true;
+        // 为 Shaka Player 初始化
+        const shaka = (window as any).shaka;
+        if (!shaka) {
+          console.error('Shaka Player 未加载');
+          setError('播放器加载失败');
+          return;
+        }
 
-        artPlayerRef.current = new Artplayer({
-          container: artRef.current,
-          url: targetUrl,
-          poster: currentChannel.logo,
-          volume: 0.7,
-          isLive: !enableDvrMode, // 根据用户设置决定是否为直播模式
-          muted: false,
-          autoplay: true,
-          pip: true,
-          autoSize: false,
-          autoMini: false,
-          screenshot: false,
-          setting: false,
-          loop: false,
-          flip: false,
-          playbackRate: false,
-          aspectRatio: false,
-          fullscreen: true,
-          fullscreenWeb: true,
-          subtitleOffset: false,
-          miniProgressBar: false,
-          mutex: true,
-          playsInline: true,
-          autoPlayback: false,
-          airplay: true,
-          theme: '#22c55e',
-          lang: 'zh-cn',
-          hotkey: false,
-          fastForward: false, // 直播不需要快进
-          autoOrientation: true,
-          lock: true,
-          moreVideoAttr: {
-            crossOrigin: 'anonymous',
-            preload: 'metadata',
-          },
-          type: playerType,
-          customType: customType,
-          icons: {
-            loading:
-              '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MCIgaGVpZ2h0PSI1MCIgdmlld0JveD0iMCAwIDUwIDUwIj48cGF0aCBkPSJNMjUuMjUxIDYuNDYxYy0xMC4zMTggMC0xOC42ODMgOC4zNjUtMTguNjgzIDE4LjY4M2g0LjA2OGMwLTguMDcgNi41NDUtMTQuNjE1IDE0LjYxNS0xNC42MTVWNi40NjF6IiBmaWxsPSIjMDA5Njg4Ij48YW5pbWF0ZVRyYW5zZm9ybSBhdHRyaWJ1dGVOYW1lPSJ0cmFuc2Zvcm0iIGF0dHJpYnV0ZVR5cGU9IlhNTCIgZHVyPSIxcyIgZnJvbT0iMCAyNSAyNSIgcmVwZWF0Q291bnQ9ImluZGVmaW5pdGUiIHRvPSIzNjAgMjUgMjUiIHR5cGU9InJvdGF0ZSIvPjwvcGF0aD48L3N2Zz4=">',
-          },
-        });
+        // 创建 Shaka 播放器实例
+        const player = new shaka.Player(videoRef.current);
+        shakaPlayerRef.current = player;
 
         // 监听播放器事件
-        artPlayerRef.current.on('ready', () => {
+        player.addEventListener('error', (event: any) => {
+          const error = event.detail;
+          console.error('Shaka Player 错误:', error);
+          setError(`播放错误: ${error.message}`);
+          setIsVideoLoading(false);
+        });
+
+        // 加载媒体
+        try {
+          await player.load(targetUrl);
           setError(null);
           setIsVideoLoading(false);
 
-          // 延迟检测是否支持 DVR/时移回放（仅在未启用DVR模式时检测）
+          // 检测 DVR 支持
           if (!enableDvrMode) {
             setTimeout(() => {
-              if (artPlayerRef.current && artPlayerRef.current.video) {
-                const video = artPlayerRef.current.video;
+              if (videoRef.current && videoRef.current.seekable && videoRef.current.seekable.length > 0) {
+                const seekableEnd = videoRef.current.seekable.end(0);
+                const seekableStart = videoRef.current.seekable.start(0);
+                const seekableRange = seekableEnd - seekableStart;
 
-                try {
-                  if (video.seekable && video.seekable.length > 0) {
-                    const seekableEnd = video.seekable.end(0);
-                    const seekableStart = video.seekable.start(0);
-                    const seekableRange = seekableEnd - seekableStart;
-
-                    // 如果可拖动范围大于60秒，说明支持回放
-                    if (seekableRange > 60) {
-                      console.log('✓ 检测到支持回放，可拖动范围:', Math.floor(seekableRange), '秒');
-                      setDvrDetected(true);
-                      setDvrSeekableRange(Math.floor(seekableRange));
-                    } else {
-                      console.log('✗ 纯直播流，可拖动范围:', Math.floor(seekableRange), '秒');
-                      setDvrDetected(false);
-                    }
-                  }
-                } catch (error) {
-                  console.log('DVR检测失败:', error);
+                if (seekableRange > 60) {
+                  console.log('✓ 检测到支持回放，可拖动范围:', Math.floor(seekableRange), '秒');
+                  setDvrDetected(true);
+                  setDvrSeekableRange(Math.floor(seekableRange));
+                } else {
+                  console.log('✗ 纯直播流，可拖动范围:', Math.floor(seekableRange), '秒');
+                  setDvrDetected(false);
                 }
               }
-            }, 3000); // 等待3秒让HLS加载足够的片段
+            }, 3000);
           }
-        });
-
-        artPlayerRef.current.on('loadstart', () => {
-          setIsVideoLoading(true);
-        });
-
-        artPlayerRef.current.on('loadeddata', () => {
+        } catch (loadError: any) {
+          console.error('加载媒体失败:', loadError);
+          setError(`媒体加载失败: ${loadError.message}`);
           setIsVideoLoading(false);
-          // 视频成功加载，清除错误状态
-          setUnsupportedType(null);
-        });
-
-        artPlayerRef.current.on('canplay', () => {
-          setIsVideoLoading(false);
-          // 视频可以播放，清除错误状态
-          setUnsupportedType(null);
-        });
-
-        artPlayerRef.current.on('waiting', () => {
-          setIsVideoLoading(true);
-        });
-
-        artPlayerRef.current.on('error', (err: any) => {
-          console.error('播放器错误:', err);
-          // 检查是否是可恢复的错误
-          const errorCode = artPlayerRef.current?.video?.error?.code;
-          if (errorCode) {
-            // MediaError codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
-            if (errorCode === 2) {
-              // 网络错误由 HLS/FLV 处理
-              console.log('Video element network error (handled by HLS/FLV)');
-            } else if (errorCode === 3) {
-              // 只在没有已设置错误时才设置解码错误
-              setUnsupportedType(prev => prev || 'decode-error');
-              setIsVideoLoading(false);
-            } else if (errorCode === 4) {
-              // 只在没有已设置错误时才设置格式不支持错误
-              // 避免覆盖 HLS/FLV 已经设置的 network-error
-              setUnsupportedType(prev => prev || 'format-not-supported');
-              setIsVideoLoading(false);
-            }
-          }
-        });
-
-        if (artPlayerRef.current?.video) {
-          ensureVideoSource(
-            artPlayerRef.current.video as HTMLVideoElement,
-            targetUrl
-          );
         }
 
       } catch (err) {
         console.error('创建播放器失败:', err);
-        // 不设置错误，只记录日志
-      }
-    }; // 结束 initPlayer 函数
-
-    // 动态导入 ArtPlayer 和 flv.js 并初始化
-    const loadAndInit = async () => {
-      try {
-        const { default: Artplayer } = await import('artplayer');
-
-        // 动态导入 flv.js（避免 SSR 问题）
-        const flvjs = await import('flv.js');
-
-        // 将导入的模块设置为全局变量供 initPlayer 使用
-        (window as any).DynamicArtplayer = Artplayer;
-        (window as any).DynamicFlvjs = flvjs.default;
-
-        await initPlayer();
-      } catch (error) {
-        console.error('动态导入 ArtPlayer 或 flv.js 失败:', error);
-        // 不设置错误，只记录日志
       }
     };
 
-    loadAndInit();
+    initPlayer();
   }, [Hls, videoUrl, currentChannel, loading, directPlaybackEnabled]);
 
   // 清理播放器资源
@@ -2309,40 +2198,44 @@ function LivePageClient() {
 
       // 上箭头 = 音量+
       if (e.key === 'ArrowUp') {
-        if (artPlayerRef.current && artPlayerRef.current.volume < 1) {
-          artPlayerRef.current.volume =
-            Math.round((artPlayerRef.current.volume + 0.1) * 10) / 10;
-          artPlayerRef.current.notice.show = `音量: ${Math.round(
-            artPlayerRef.current.volume * 100
-          )}`;
+        if (videoRef.current && videoRef.current.volume < 1) {
+          videoRef.current.volume =
+            Math.round((videoRef.current.volume + 0.1) * 10) / 10;
           e.preventDefault();
         }
       }
 
       // 下箭头 = 音量-
       if (e.key === 'ArrowDown') {
-        if (artPlayerRef.current && artPlayerRef.current.volume > 0) {
-          artPlayerRef.current.volume =
-            Math.round((artPlayerRef.current.volume - 0.1) * 10) / 10;
-          artPlayerRef.current.notice.show = `音量: ${Math.round(
-            artPlayerRef.current.volume * 100
-          )}`;
+        if (videoRef.current && videoRef.current.volume > 0) {
+          videoRef.current.volume =
+            Math.round((videoRef.current.volume - 0.1) * 10) / 10;
           e.preventDefault();
         }
       }
 
       // 空格 = 播放/暂停
       if (e.key === ' ') {
-        if (artPlayerRef.current) {
-          artPlayerRef.current.toggle();
+        if (videoRef.current) {
+          if (videoRef.current.paused) {
+            videoRef.current.play();
+          } else {
+            videoRef.current.pause();
+          }
           e.preventDefault();
         }
       }
 
       // f 键 = 切换全屏
       if (e.key === 'f' || e.key === 'F') {
-        if (artPlayerRef.current) {
-          artPlayerRef.current.fullscreen = !artPlayerRef.current.fullscreen;
+        if (videoRef.current) {
+          if (document.fullscreenElement === videoRef.current) {
+            document.exitFullscreen();
+          } else {
+            videoRef.current.requestFullscreen().catch(err => {
+              console.warn('全屏请求失败:', err);
+            });
+          }
           e.preventDefault();
         }
       }

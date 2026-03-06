@@ -401,7 +401,7 @@ This project is licensed under **CC BY-NC-SA 4.0**, with the following terms:
 | Frontend      | [Next.js 16.1.0](https://nextjs.org/) · App Router                                                           |
 | UI & Styling  | [Tailwind CSS 4.1.18](https://tailwindcss.com/) · [Framer Motion 12.18.1](https://www.framer.com/motion/)          |
 | Language      | TypeScript 5.8.3                                                                                               |
-| Player        | [ArtPlayer 5.3.0](https://github.com/zhw2590582/ArtPlayer) · [HLS.js 1.6.15](https://github.com/video-dev/hls.js/) · [artplayer-plugin-danmuku 5.2.0](https://github.com/zhw2590582/ArtPlayer) |
+| Player        | [Shaka Player](https://github.com/shaka-player/shaka-player) · built‑in HLS/DASH support · custom danmaku overlay |
 | State Mgmt    | React 19.0.0 Context API · React Hooks                                                                                |
 | Data Storage  | Kvrocks · Redis · Upstash · localStorage                                                                       |
 | Virtualization| [react-window 2.2.3](https://github.com/bvaughn/react-window) · ResizeObserver                                |
