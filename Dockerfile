@@ -19,17 +19,18 @@ RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
-# 复制package files先，确保依赖版本一致
+# 复制依赖描述并同步模块
 COPY package.json pnpm-lock.yaml ./
-# 复制依赖
 COPY --from=deps /app/node_modules ./node_modules
-# 验证依赖完整性，如果不匹配则重新安装
+# 确保依赖完整性
 RUN pnpm install --frozen-lockfile --offline || pnpm install --frozen-lockfile
+
 # 复制全部源代码
 COPY . .
 
 # 在构建阶段设置 DOCKER_BUILD，启用 standalone 输出
 ENV DOCKER_BUILD=true
+ENV NEXT_EXPERIMENTAL_TURBOPACK=false
 
 # 生成生产构建
 RUN pnpm run build
